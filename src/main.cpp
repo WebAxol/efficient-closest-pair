@@ -22,9 +22,12 @@ Closest<T> bruteClosestPair(vector<T> &points, int L = 0, int R = -1){
     
     if(R == -1) R = n - 1;
     
+    // Menos de 2 puntos: no existe par
+    if(R - L < 1) return {1e8, T{}, T{} };
+
     double minDist = 1e8;
     T ith = points[L];
-    T jth = points[R];
+    T jth = points[L + 1];
     
     for(int i = L; i <= R; i++){
         for(int j = i + 1; j <= R; j++){
@@ -42,51 +45,60 @@ Closest<T> bruteClosestPair(vector<T> &points, int L = 0, int R = -1){
     return { minDist, ith, jth };
 }
 
-// Une el resultado de ambas mitades, considerando la región sospechosa que las separa
-// Complejidad temporal: O(nlog(n))
+// Algoritmo D&C con presorting.
+// P se ordena por x una sola vez y nunca se modifica. Y contiene los índices (rangos) de P[L..R]
+// ordenados por y; se obtiene con un solo sort global y luego se particiona de forma estable en cada nivel.
+// Así ni la división ni la franja requieren ordenar de nuevo: cada nivel cuesta O(n).
+// Complejidad temporal: T(n) = 2T(n/2) + O(n) = O(nlog(n))
 template<typename T>
-Closest<T> merge(
-    vector<T> &points,
-    Closest<T> cr,
-    Closest<T> cl,
-    int L,
-    int mid,
-    int R
-){
+Closest<T> closestPairHelper(const vector<T> &P, int L, int R, const vector<int> &Y){
 
-    double dl = cl.dist, dr = cr.dist;
+    const int N = R - L + 1;
+
+    if(N <= 3){
+        // bruteClosestPair recibe referencia no constante, por eso se copia el rango (<= 3 puntos)
+        vector<T> small(P.begin() + L, P.begin() + R + 1);
+        return bruteClosestPair(small);
+    }
+
+    int mid = L + (R - L) / 2;
+    double midX = P[mid].x;
+
+    // Partición por rango, así los empates en x no desalinean las mitades
+    vector<int> Yl, Yr;
+    Yl.reserve(mid - L + 1);
+    Yr.reserve(R - mid);
+    for(int r : Y) (r <= mid ? Yl : Yr).push_back(r);
+
+    Closest<T> cl = closestPairHelper(P, L,       mid, Yl);
+    Closest<T> cr = closestPairHelper(P, mid + 1, R,   Yr);
+
+    double d = cl.dist;
     T ith = cl.i, jth = cl.j;
 
-    double d = dl;
-    
-    if(dr < dl){
-        d = dr;
+    if(cr.dist < d){
+        d = cr.dist;
         ith = cr.i;
         jth = cr.j;
     }
-        
-    vector<T> strip;
-    for(int i = L; i <= R; i++){
-        if(abs(points[i].x - points[mid].x) < d){
-            strip.push_back(points[i]);
-        }
+
+    vector<int> strip;
+    for(int r : Y){
+        if(abs(P[r].x - midX) < d) strip.push_back(r);
     }
-    
-    
 
-    sort(strip.begin(),strip.end(), [](T point1, T point2){
-       return point1.y < point2.y;
-    });
-
+    // Se recorre mientras la diferencia en y sea menor que d (en teoría, solo debería iterar 7 vecinos en 2d)
     for(int i = 0; i < (int)strip.size(); i++){
-        for(int j = i + 1; j < (int)strip.size() && strip[j].y - strip[i].y < d; j++){
-    
-             double newDist = dist(strip[i],strip[j]);
-             
-             if(d > newDist){
+        for(int j = i + 1; j < (int)strip.size() && P[strip[j]].y - P[strip[i]].y < d; j++){
+
+            cout << i << endl;
+
+            double newDist = dist(P[strip[i]], P[strip[j]]);
+
+            if(d > newDist){
                 d = newDist;
-                ith = strip[i];
-                jth = strip[j];
+                ith = P[strip[i]];
+                jth = P[strip[j]];
             }
         }
     }
@@ -95,48 +107,29 @@ Closest<T> merge(
 }
 
 template<typename T>
-Closest<T> closestPairHelper(vector<T> &points, int L = 0, int R = -1){
-
-    const int N = R - L + 1;
-  
-    if(N == 2 || N == 3) return bruteClosestPair(points, L, R);
-    
-    int mid = L + (R - L) / 2;
-    
-    // Aquí se divide el problema y se resuelven las mitades por separado
-    
-    Closest<T> cl = closestPairHelper(points, L,     mid);
-    Closest<T> cr = closestPairHelper(points, mid + 1, R);
-    
- 
-    // Nota: el límite de "7 vecinos" solo es válido en 2D. En 3D (y en general) se
-    // recorre mientras la diferencia en y sea menor que d, lo cual es correcto en cualquier dimensión
-       
-    return merge(
-        points, 
-        cl, 
-        cr,
-        L,
-        mid,
-        R
-    );
-}
-
-template<typename T>
 Closest<T> efficientClosestPair(vector<T> points){
-    
-    sort(points.begin(),points.end(), [](T point1, T point2){
-        return point1.x < point2.x;
+
+    if(points.size() < 2) return {1e8, T{}, T{} };
+
+    // Único ordenamiento por x
+    sort(points.begin(), points.end(), [](const T &a, const T &b){
+        return a.x < b.x;
     });
 
-    int L = 0;
-    int R = points.size() - 1;
-    
-    return closestPairHelper(points, L, R);
+    // Único ordenamiento por y (sobre rangos de points)
+    // El vector Y contiene los índices al vector de puntos ordenado
+    // dichos indices a su vez se encuentran ordenados por la posición y de cada punto
+    // de modo que no es necesario reordenar en cada merge. Los índices son estables.
+    vector<int> Y(points.size());
+    iota(Y.begin(), Y.end(), 0);
+    sort(Y.begin(), Y.end(), [&](int a, int b){
+        return points[a].y < points[b].y;
+    });
+
+    return closestPairHelper(points, 0, (int)points.size() - 1, Y);
 }
 
 // Exportar resultado (para poder hacer las gráficas en Python)
-
 
 void exportToFile(
     ofstream& file,
@@ -318,7 +311,7 @@ int main(){
     // Caso 3: puntos-n50-3d.txt
     // Caso 4: puntos-n100-3d.txt
 
-    run3D();
+    //run3D();
     
 
     return 0;

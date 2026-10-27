@@ -8,8 +8,6 @@
 
 using namespace std;
 
-// Modelos
-
 // Calcular par más cercano 
 // Nota: se usan templates para poder pasar parámetros de tipo vector<Point2D> y vector<Point3D> sin reescribir toda la lógica
 
@@ -43,6 +41,67 @@ Closest<T> bruteClosestPair(vector<T> &points, int L = 0, int R = -1){
     }
     
     return { minDist, ith, jth };
+}
+
+
+// DECLARACIÓN DE USO DE IA: Logré implementar closest pair 2D, pero batallé para dar el salto al 3D
+// Las funciones stripSearch fueron hechas con ayuda de Claude Sonnet 5.5:
+// Prompt: "lee research.pdf y aplica los cambios necesarios para que el algoritmo closest pair sea eficiente para puntos 3D"
+
+// Fusión (barrido de la franja/losa). 'strip' contiene los índices de P dentro de la franja, ordenados por y.
+// Actualiza d, ith y jth si encuentra un par más cercano que d.
+
+// 2D: se recorre mientras la diferencia en y sea menor que d (a lo más 7 vecinos por punto)
+void stripSearch(const vector<Point2D> &P, const vector<int> &strip, double &d, Point2D &ith, Point2D &jth){
+    for(int i = 0; i < (int)strip.size(); i++){
+        for(int j = i + 1; j < (int)strip.size() && P[strip[j]].y - P[strip[i]].y < d; j++){
+
+            double newDist = dist(P[strip[i]], P[strip[j]]);
+
+            if(d > newDist){
+                d = newDist;
+                ith = P[strip[i]];
+                jth = P[strip[j]];
+            }
+        }
+    }
+}
+
+// 3D: la losa tiene grosor 2d en x, y se barre en orden creciente de y manteniendo una ventana con los puntos
+// cuya diferencia en y es menor que d, indexada por z. Así, para cada punto solo se visitan los candidatos que
+// están dentro de la caja 2d x d x 2d, que por empaquetamiento (cubos de lado d/2) contiene a lo más 31 vecinos.
+// Recorrer únicamente por y (sin acotar z) no garantiza esa cota: la ventana en y puede contener O(n) puntos
+// con z muy distintos (p. ej. puntos alineados en z), degenerando a O(n²).
+// Costo de la fusión: O(m log m) con m puntos en la losa.
+void stripSearch(const vector<Point3D> &P, const vector<int> &strip, double &d, Point3D &ith, Point3D &jth){
+
+    multiset<pair<double,int>> window; // (z, posición en strip)
+    int left = 0;
+
+    for(int i = 0; i < (int)strip.size(); i++){
+        const Point3D &p = P[strip[i]];
+
+        // Sacar de la ventana los puntos con diferencia en y >= d (d solo decrece, nunca vuelven a servir)
+        while(left < i && p.y - P[strip[left]].y >= d){
+            window.erase(window.find({ P[strip[left]].z, left }));
+            left++;
+        }
+
+        // Solo candidatos con z en (p.z - d, p.z + d)
+        for(auto it = window.lower_bound({ p.z - d, -1 }); it != window.end() && it->first - p.z < d; ++it){
+
+            const Point3D &q = P[strip[it->second]];
+            double newDist = dist(p, q);
+
+            if(d > newDist){
+                d = newDist;
+                ith = q;
+                jth = p;
+            }
+        }
+
+        window.insert({ p.z, i });
+    }
 }
 
 // Algoritmo D&C con presorting.
@@ -87,21 +146,7 @@ Closest<T> closestPairHelper(const vector<T> &P, int L, int R, const vector<int>
         if(abs(P[r].x - midX) < d) strip.push_back(r);
     }
 
-    // Se recorre mientras la diferencia en y sea menor que d (en teoría, solo debería iterar 7 vecinos en 2d)
-    for(int i = 0; i < (int)strip.size(); i++){
-        for(int j = i + 1; j < (int)strip.size() && P[strip[j]].y - P[strip[i]].y < d; j++){
-
-            cout << i << endl;
-
-            double newDist = dist(P[strip[i]], P[strip[j]]);
-
-            if(d > newDist){
-                d = newDist;
-                ith = P[strip[i]];
-                jth = P[strip[j]];
-            }
-        }
-    }
+    stripSearch(P, strip, d, ith, jth);
 
     return { d, ith, jth };
 }
@@ -311,7 +356,7 @@ int main(){
     // Caso 3: puntos-n50-3d.txt
     // Caso 4: puntos-n100-3d.txt
 
-    //run3D();
+    run3D();
     
 
     return 0;
